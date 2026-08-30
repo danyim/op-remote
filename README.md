@@ -95,9 +95,10 @@ To use Slack for approvals instead of Telegram, set
 
 Approval messages render as a Block Kit card with **Approve** / **Reject** /
 **Auto-Approve** / **Stop** buttons; Reject/Stop open a modal to capture a
-reason. Messages are updated in place on every decision, and secrets never
-appear in Slack — only variable names, the command, and the working
-directory.
+reason. On every decision the card is updated to show the outcome (buttons
+removed) and the confirmation is posted as a thread reply to the original
+request. Secrets never appear in Slack — only variable names, the command,
+and the working directory.
 
 ### Project `.env.tpl` (required)
 

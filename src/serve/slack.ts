@@ -196,6 +196,7 @@ interface PendingApproval {
   nonce: string;
   channelId: string;
   messageTs: string;
+  blocks: SlackBlock[];
   config: SlackConfig;
   timer: ReturnType<typeof setTimeout>;
   rejectionAction: "reject" | "stop";
@@ -298,12 +299,33 @@ function isAuthorized(config: SlackConfig, userId: string | undefined): boolean 
   return userId !== undefined && config.approverIds.includes(userId);
 }
 
-async function updateMessage(ctx: PendingApproval, text: string): Promise<void> {
-  await slackApi(ctx.config.botToken, "chat.update", {
-    channel: ctx.channelId,
-    ts: ctx.messageTs,
-    text,
-  });
+/**
+ * Confirms a decision on the original approval message: the buttons are
+ * removed from the card (replaced by a status section) and the confirmation
+ * is posted as a thread reply to the original message.
+ */
+async function confirmDecision(
+  ctx: PendingApproval,
+  statusText: string,
+  threadText: string,
+): Promise<void> {
+  const updatedBlocks = [
+    ...ctx.blocks.filter((b) => b.type !== "actions"),
+    { type: "section", text: { type: "mrkdwn", text: statusText } },
+  ];
+  await Promise.all([
+    slackApi(ctx.config.botToken, "chat.update", {
+      channel: ctx.channelId,
+      ts: ctx.messageTs,
+      blocks: updatedBlocks,
+      text: statusText,
+    }),
+    slackApi(ctx.config.botToken, "chat.postMessage", {
+      channel: ctx.channelId,
+      thread_ts: ctx.messageTs,
+      text: threadText,
+    }),
+  ]);
 }
 
 function finishApproval(ctx: PendingApproval, result: ApprovalResult): void {
@@ -346,8 +368,11 @@ function handleInteractive(config: SlackConfig, payload: unknown): void {
 
     if (APPROVE_ACTIONS.has(parsed.action)) {
       const label = parsed.action === "auto_approve" ? "Auto-approved" : "Approved";
-      void updateMessage(ctx, `✅ ${label} at ${new Date().toLocaleTimeString()}`)
-        .catch((err) => console.error("[op-remote:slack] chat.update failed:", err.message))
+      const at = new Date().toLocaleTimeString();
+      const status = `✅ ${label} at ${at}`;
+      const thread = p.user?.id ? `✅ ${label} by <@${p.user.id}> at ${at}` : status;
+      void confirmDecision(ctx, status, thread)
+        .catch((err) => console.error("[op-remote:slack] confirm failed:", err.message))
         .then(() => finishApproval(ctx, { action: parsed.action as "approve" | "auto_approve" }));
       return;
     }
@@ -377,12 +402,17 @@ function handleInteractive(config: SlackConfig, payload: unknown): void {
     if (p.type === "view_submission") {
       const reason = extractReason(p.view);
       const label = ctx.rejectionAction === "stop" ? "Stopped" : "Rejected";
-      void updateMessage(ctx, `❌ ${label}${reason ? `: ${reason}` : ""}`)
-        .catch((err) => console.error("[op-remote:slack] chat.update failed:", err.message))
+      const suffix = reason ? `: ${reason}` : "";
+      const status = `❌ ${label}${suffix}`;
+      const thread = p.user?.id ? `❌ ${label} by <@${p.user.id}>${suffix}` : status;
+      void confirmDecision(ctx, status, thread)
+        .catch((err) => console.error("[op-remote:slack] confirm failed:", err.message))
         .then(() => finishApproval(ctx, { action: ctx.rejectionAction, reason }));
     } else {
-      void updateMessage(ctx, "❌ Rejected")
-        .catch((err) => console.error("[op-remote:slack] chat.update failed:", err.message))
+      const status = "❌ Rejected";
+      const thread = p.user?.id ? `❌ Rejected by <@${p.user.id}>` : status;
+      void confirmDecision(ctx, status, thread)
+        .catch((err) => console.error("[op-remote:slack] confirm failed:", err.message))
         .then(() => finishApproval(ctx, { action: ctx.rejectionAction }));
     }
   }
@@ -391,7 +421,7 @@ function handleInteractive(config: SlackConfig, payload: unknown): void {
 async function openReasonModal(ctx: PendingApproval, triggerId: string | undefined): Promise<void> {
   if (!triggerId) {
     // Trigger IDs expire seconds after the interaction; fall back to a plain rejection.
-    await updateMessage(ctx, "❌ Rejected");
+    await confirmDecision(ctx, "❌ Rejected", "❌ Rejected");
     finishApproval(ctx, { action: ctx.rejectionAction });
     return;
   }
@@ -430,6 +460,7 @@ function awaitApproval(
   nonce: string,
   channelId: string,
   messageTs: string,
+  blocks: SlackBlock[],
 ): Promise<ApprovalResult> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -437,7 +468,9 @@ function awaitApproval(
       if (!ctx) {
         return;
       }
-      void updateMessage(ctx, "⏰ Timed out").catch(() => {});
+      void confirmDecision(ctx, "⏰ Timed out", "⏰ Timed out — no response received").catch(
+        () => {},
+      );
       finishApproval(ctx, { action: "reject", reason: "permission request timed out" });
     }, config.timeoutMs);
 
@@ -445,6 +478,7 @@ function awaitApproval(
       nonce,
       channelId,
       messageTs,
+      blocks,
       config,
       timer,
       rejectionAction: "reject",
@@ -460,21 +494,23 @@ export async function requestRunApproval(
 ): Promise<ApprovalResult> {
   await getSocket(config);
   const nonce = crypto.randomUUID();
+  const blocks = buildApprovalBlocks(nonce, opts, config.timeoutMs);
   const sent = await slackApi<{ ts: string }>(config.botToken, "chat.postMessage", {
     channel: config.channelId,
-    blocks: buildApprovalBlocks(nonce, opts, config.timeoutMs),
+    blocks,
     text: `🔑 Secret access request (expires ${formatExpiry(config.timeoutMs)})`,
   });
-  return awaitApproval(config, nonce, config.channelId, sent.ts);
+  return awaitApproval(config, nonce, config.channelId, sent.ts, blocks);
 }
 
 export async function requestResumeApproval(config: SlackConfig): Promise<ApprovalResult> {
   await getSocket(config);
   const nonce = crypto.randomUUID();
+  const blocks = buildResumeBlocks(nonce, config.timeoutMs);
   const sent = await slackApi<{ ts: string }>(config.botToken, "chat.postMessage", {
     channel: config.channelId,
-    blocks: buildResumeBlocks(nonce, config.timeoutMs),
+    blocks,
     text: `🔄 Resume request (expires ${formatExpiry(config.timeoutMs)})`,
   });
-  return awaitApproval(config, nonce, config.channelId, sent.ts);
+  return awaitApproval(config, nonce, config.channelId, sent.ts, blocks);
 }
