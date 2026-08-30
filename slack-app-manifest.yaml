@@ -1,0 +1,28 @@
+# Slack app manifest for the op-remote approval bot.
+#
+# Create the app at https://api.slack.com/apps?new_app=1 -> "From an app
+# manifest" and paste the contents of this file. After creation:
+#   1. Basic Information -> App-Level Tokens -> Generate Token
+#      (scope: connections:write)  ->  that's SLACK_APP_TOKEN (xapp-...)
+#   2. OAuth & Permissions -> Install to Workspace
+#      -> copy the Bot User OAuth Token  ->  that's SLACK_BOT_TOKEN (xoxb-...)
+#   3. /invite @op-remote approvals into the channel you want approvals in
+#      and use that channel's ID as SLACK_CHANNEL_ID
+_metadata:
+  major_version: 1
+display_information:
+  name: op-remote approvals
+  description: Approval bot for op-remote (1Password secret access requests)
+  background_color: "#4b367c"
+features:
+  bot_user:
+    display_name: op-remote approvals
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - chat:write.public
+settings:
+  socket_mode_enabled: true
+  token_rotation_enabled: false
