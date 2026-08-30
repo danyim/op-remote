@@ -68,7 +68,20 @@ interface SlackBlock {
   [key: string]: unknown;
 }
 
-export function buildApprovalBlocks(nonce: string, opts: RunApprovalOpts): SlackBlock[] {
+/** Formats an approval timeout as a human-readable expiry, e.g. "in 5m". */
+export function formatExpiry(timeoutMs: number): string {
+  const totalSeconds = Math.round(timeoutMs / 1000);
+  if (totalSeconds >= 60) {
+    return `in ${Math.round(totalSeconds / 60)}m`;
+  }
+  return `in ${totalSeconds}s`;
+}
+
+export function buildApprovalBlocks(
+  nonce: string,
+  opts: RunApprovalOpts,
+  timeoutMs: number,
+): SlackBlock[] {
   const secretList = opts.secretNames.map((s) => `  - ${s}`).join("\n");
   return [
     {
@@ -85,6 +98,7 @@ export function buildApprovalBlocks(nonce: string, opts: RunApprovalOpts): Slack
           `*Working dir:* \`${opts.cwd}\``,
           "*Secrets:*",
           secretList,
+          `*Expires:* ${formatExpiry(timeoutMs)}`,
         ].join("\n"),
       },
     },
@@ -119,13 +133,13 @@ export function buildApprovalBlocks(nonce: string, opts: RunApprovalOpts): Slack
   ];
 }
 
-export function buildResumeBlocks(nonce: string): SlackBlock[] {
+export function buildResumeBlocks(nonce: string, timeoutMs: number): SlackBlock[] {
   return [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: "*🔄 Resume request*\nThe agent is requesting to resume the session.",
+        text: `*🔄 Resume request*\nThe agent is requesting to resume the session.\n*Expires:* ${formatExpiry(timeoutMs)}`,
       },
     },
     {
@@ -448,8 +462,8 @@ export async function requestRunApproval(
   const nonce = crypto.randomUUID();
   const sent = await slackApi<{ ts: string }>(config.botToken, "chat.postMessage", {
     channel: config.channelId,
-    blocks: buildApprovalBlocks(nonce, opts),
-    text: "🔑 Secret access request",
+    blocks: buildApprovalBlocks(nonce, opts, config.timeoutMs),
+    text: `🔑 Secret access request (expires ${formatExpiry(config.timeoutMs)})`,
   });
   return awaitApproval(config, nonce, config.channelId, sent.ts);
 }
@@ -459,8 +473,8 @@ export async function requestResumeApproval(config: SlackConfig): Promise<Approv
   const nonce = crypto.randomUUID();
   const sent = await slackApi<{ ts: string }>(config.botToken, "chat.postMessage", {
     channel: config.channelId,
-    blocks: buildResumeBlocks(nonce),
-    text: "🔄 Resume request",
+    blocks: buildResumeBlocks(nonce, config.timeoutMs),
+    text: `🔄 Resume request (expires ${formatExpiry(config.timeoutMs)})`,
   });
   return awaitApproval(config, nonce, config.channelId, sent.ts);
 }

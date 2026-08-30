@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a1745"/>
+      <stop offset="1" stop-color="#0b0514"/>
+    </linearGradient>
+    <linearGradient id="wash" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff4000" stop-opacity="0.55"/>
+      <stop offset="0.55" stop-color="#ff4000" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#ff4000" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="keyhole" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff8a5c"/>
+      <stop offset="1" stop-color="#ff4000"/>
+    </linearGradient>
+  </defs>
+
+  <!-- full-bleed base (OS/app stores mask the corners) -->
+  <rect x="0" y="0" width="512" height="512" fill="url(#bg)"/>
+
+  <!-- color overlay wash -->
+  <rect x="0" y="0" width="512" height="512" fill="url(#wash)"/>
+
+  <!-- 1P monogram -->
+  <g fill="#ffffff">
+    <!-- 1: flag + stem -->
+    <path d="M 124 186 L 172 206 L 172 230 L 124 210 Z"/>
+    <rect x="156" y="192" width="48" height="160" rx="20"/>
+    <!-- P: stem + bowl -->
+    <rect x="238" y="192" width="44" height="160" rx="20"/>
+    <path d="M 238 192 L 266 192 Q 388 192 388 272 Q 388 352 266 352 L 238 352 Z"/>
+  </g>
+
+  <!-- keyhole counter in P bowl (1Password red) -->
+  <circle cx="326" cy="272" r="42" fill="url(#keyhole)"/>
+
+  <!-- approval check badge -->
+  <circle cx="402" cy="392" r="54" fill="#ffffff"/>
+  <path d="M 374 394 L 396 416 L 432 372" fill="none" stroke="#12b76a" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- sparkle -->
+  <path d="M 428 84 L 436 108 L 460 116 L 436 124 L 428 148 L 420 124 L 396 116 L 420 108 Z" fill="#ffd166"/>
+</svg>
