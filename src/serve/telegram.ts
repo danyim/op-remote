@@ -1,3 +1,6 @@
+import type { ApprovalResult } from "./approval.ts";
+export type { ApprovalResult };
+
 const API_BASE = "https://api.telegram.org/bot";
 
 interface TelegramConfig {
@@ -11,11 +14,6 @@ interface TelegramConfig {
 interface InlineButton {
   text: string;
   callbackData: string;
-}
-
-export interface ApprovalResult {
-  action: "approve" | "reject" | "auto_approve" | "stop";
-  reason?: string;
 }
 
 async function apiCall<T>(

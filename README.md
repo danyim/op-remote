@@ -56,15 +56,48 @@ bun install -g @wyattjoh/op-remote
 
 ### Environment variables
 
-| Variable                          | Required | Description                                                                      |
-| --------------------------------- | -------- | -------------------------------------------------------------------------------- |
-| `REMOTE_OP_TELEGRAM_BOT_TOKEN`    | Yes      | Telegram bot token for sending approval requests                                 |
-| `REMOTE_OP_TELEGRAM_CHAT_ID`      | Yes      | Telegram chat ID to send approval messages to                                    |
-| `REMOTE_OP_TELEGRAM_APPROVER_IDS` | No       | Comma-separated Telegram user IDs allowed to approve/reject (all users if unset) |
-| `REMOTE_OP_TIMEOUT`               | No       | Approval timeout in seconds (default: `120`)                                     |
+| Variable                          | Required    | Description                                                                      |
+| --------------------------------- | ----------- | -------------------------------------------------------------------------------- |
+| `REMOTE_OP_APPROVAL_PROVIDER`     | No          | Approval channel: `telegram` (default) or `slack`                                |
+| `REMOTE_OP_TELEGRAM_BOT_TOKEN`    | If telegram | Telegram bot token for sending approval requests                                 |
+| `REMOTE_OP_TELEGRAM_CHAT_ID`      | If telegram | Telegram chat ID to send approval messages to                                    |
+| `REMOTE_OP_TELEGRAM_APPROVER_IDS` | No          | Comma-separated Telegram user IDs allowed to approve/reject (all users if unset) |
+| `SLACK_BOT_TOKEN`                 | If slack    | Slack bot token (`xoxb-...`) for posting approval requests                       |
+| `SLACK_APP_TOKEN`                 | If slack    | Slack app-level token (`xapp-...`, Socket Mode, `connections:write`)             |
+| `SLACK_CHANNEL_ID`                | If slack    | Slack channel ID to send approval messages to (bot must be a member)             |
+| `SLACK_APPROVER_IDS`              | No          | Comma-separated Slack user IDs allowed to approve/reject (all users if unset)    |
+| `REMOTE_OP_TIMEOUT`               | No          | Approval timeout in seconds (default: `120`)                                     |
 
 When installed as the Claude Code plugin, the Telegram variables above are
 supplied via the plugin's user config and do not need to be set manually.
+
+### Slack provider setup
+
+To use Slack for approvals instead of Telegram, set
+`REMOTE_OP_APPROVAL_PROVIDER=slack` and configure a Slack app:
+
+1. Create an app at https://api.slack.com/apps (or reuse an existing one).
+2. Under **Socket Mode**, enable **Enable Socket Mode** and generate an
+   **app-level token** with the `connections:write` scope — that's your
+   `SLACK_APP_TOKEN`. Slack allows up to 10 concurrent Socket Mode
+   connections per app (one per app-level token), so a second app-level token
+   for the same app works alongside an existing consumer such as a bot
+   gateway without disrupting it.
+3. Under **OAuth & Permissions**, add the `chat:write` bot scope (add
+   `chat:write.public` if the bot posts to public channels without being
+   invited), install the app to your workspace, and copy the **bot token**
+   (`xoxb-...`) — that's your `SLACK_BOT_TOKEN`.
+4. Invite the bot to the channel you want approvals in
+   (`/invite @your-app`) and use that channel's ID as `SLACK_CHANNEL_ID`
+   (right-click the channel > **View channel details** > copy the channel ID,
+   or via the API).
+5. Optionally set `SLACK_APPROVER_IDS` to restrict who may respond.
+
+Approval messages render as a Block Kit card with **Approve** / **Reject** /
+**Auto-Approve** / **Stop** buttons; Reject/Stop open a modal to capture a
+reason. Messages are updated in place on every decision, and secrets never
+appear in Slack — only variable names, the command, and the working
+directory.
 
 ### Project `.env.tpl` (required)
 
@@ -166,18 +199,18 @@ op-remote run \
 
 ### MCP tools
 
-| Tool                   | Description                                                                   |
-| ---------------------- | ----------------------------------------------------------------------------- |
-| `request_token`        | Returns a one-time token and Unix socket path for authenticating with the CLI |
-| `resume`               | Request to resume a stopped session (requires Telegram approval)              |
-| `disable_auto_approve` | Turn off auto-approval, requiring Telegram approval for future requests       |
+| Tool                   | Description                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------ |
+| `request_token`        | Returns a one-time token and Unix socket path for authenticating with the CLI              |
+| `resume`               | Request to resume a stopped session (requires approval via the configured provider)        |
+| `disable_auto_approve` | Turn off auto-approval, requiring approval via the configured provider for future requests |
 
-### Telegram approval buttons
+### Approval buttons
 
-When a secret access request is sent to Telegram, the approver sees:
+When a secret access request is sent to the approval channel, the approver sees:
 
 - **Approve** - allow this single request
-- **Reject** - deny the request (prompts for a reason via reply)
+- **Reject** - deny the request (prompts for a reason — a reply in Telegram, a modal in Slack)
 - **Auto-Approve** - approve this and all future requests in the session
 - **Stop** - reject and halt the session entirely (the agent is instructed to stop)
 

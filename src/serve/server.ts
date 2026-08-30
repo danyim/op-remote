@@ -3,30 +3,51 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import type { SocketRequest, SocketResponse } from "../protocol.ts";
 import { readEnvFile } from "../run/envfile.ts";
-import { createSession } from "./session.ts";
+import { createSession, type RunApprovalInput } from "./session.ts";
 import { type SocketHandler, createSocketServer } from "./socket.ts";
-import { requestResumeApproval, requestRunApproval } from "./telegram.ts";
+import {
+  requestResumeApproval as telegramResume,
+  requestRunApproval as telegramRun,
+} from "./telegram.ts";
+import { requestResumeApproval as slackResume, requestRunApproval as slackRun } from "./slack.ts";
 import { TokenStore } from "./tokens.ts";
 
+type ApprovalProvider = "telegram" | "slack";
+
 interface ServerConfig {
+  provider: ApprovalProvider;
+  timeoutMs: number;
   telegramBotToken: string;
   telegramChatId: string;
-  timeoutMs: number;
   telegramApproverIds: number[];
+  slackBotToken: string;
+  slackAppToken: string;
+  slackChannelId: string;
+  slackApproverIds: string[];
 }
 
 function readConfig(): ServerConfig {
-  const botToken = process.env.REMOTE_OP_TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.REMOTE_OP_TELEGRAM_CHAT_ID;
-
-  if (!botToken) {
-    throw new Error("REMOTE_OP_TELEGRAM_BOT_TOKEN is required");
-  }
-  if (!chatId) {
-    throw new Error("REMOTE_OP_TELEGRAM_CHAT_ID is required");
+  const provider = (
+    process.env.REMOTE_OP_APPROVAL_PROVIDER ?? "telegram"
+  ).toLowerCase() as ApprovalProvider;
+  if (provider !== "telegram" && provider !== "slack") {
+    throw new Error(`REMOTE_OP_APPROVAL_PROVIDER must be "telegram" or "slack", got "${provider}"`);
   }
 
   const timeoutMs = Number.parseInt(process.env.REMOTE_OP_TIMEOUT ?? "120", 10) * 1000;
+
+  const telegramBotToken = process.env.REMOTE_OP_TELEGRAM_BOT_TOKEN ?? "";
+  const telegramChatId = process.env.REMOTE_OP_TELEGRAM_CHAT_ID ?? "";
+  if (provider === "telegram" && !telegramBotToken) {
+    throw new Error(
+      "REMOTE_OP_TELEGRAM_BOT_TOKEN is required when REMOTE_OP_APPROVAL_PROVIDER=telegram",
+    );
+  }
+  if (provider === "telegram" && !telegramChatId) {
+    throw new Error(
+      "REMOTE_OP_TELEGRAM_CHAT_ID is required when REMOTE_OP_APPROVAL_PROVIDER=telegram",
+    );
+  }
 
   const approverIdsRaw = process.env.REMOTE_OP_TELEGRAM_APPROVER_IDS ?? "";
   const telegramApproverIds = approverIdsRaw
@@ -36,7 +57,35 @@ function readConfig(): ServerConfig {
     .map(Number)
     .filter((n) => !Number.isNaN(n));
 
-  return { telegramBotToken: botToken, telegramChatId: chatId, timeoutMs, telegramApproverIds };
+  const slackBotToken = process.env.SLACK_BOT_TOKEN ?? "";
+  const slackAppToken = process.env.SLACK_APP_TOKEN ?? "";
+  const slackChannelId = process.env.SLACK_CHANNEL_ID ?? "";
+  if (provider === "slack" && !slackBotToken) {
+    throw new Error("SLACK_BOT_TOKEN is required when REMOTE_OP_APPROVAL_PROVIDER=slack");
+  }
+  if (provider === "slack" && !slackAppToken) {
+    throw new Error("SLACK_APP_TOKEN is required when REMOTE_OP_APPROVAL_PROVIDER=slack");
+  }
+  if (provider === "slack" && !slackChannelId) {
+    throw new Error("SLACK_CHANNEL_ID is required when REMOTE_OP_APPROVAL_PROVIDER=slack");
+  }
+
+  const slackApproverIds = (process.env.SLACK_APPROVER_IDS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  return {
+    provider,
+    timeoutMs,
+    telegramBotToken,
+    telegramChatId,
+    telegramApproverIds,
+    slackBotToken,
+    slackAppToken,
+    slackChannelId,
+    slackApproverIds,
+  };
 }
 
 /**
@@ -75,7 +124,7 @@ async function loadEnvFile(envFile: string): Promise<void> {
 }
 
 export async function startServer(opts: { envFile?: string } = {}): Promise<void> {
-  // A Telegram hiccup or malformed update must never take the server down.
+  // A provider hiccup or malformed update must never take the server down.
   // Log and keep running so the in-flight socket handler can still respond.
   process.on("unhandledRejection", (reason) => {
     console.error("[op-remote] unhandled rejection:", reason);
@@ -88,17 +137,45 @@ export async function startServer(opts: { envFile?: string } = {}): Promise<void
   const config = readConfig();
   const tokens = new TokenStore(config.timeoutMs);
 
-  const telegramConfig = {
-    botToken: config.telegramBotToken,
-    chatId: config.telegramChatId,
-    timeoutMs: config.timeoutMs,
-    approverIds: config.telegramApproverIds,
-  };
+  const runApproval = (input: RunApprovalInput) =>
+    config.provider === "slack"
+      ? slackRun(
+          {
+            botToken: config.slackBotToken,
+            appToken: config.slackAppToken,
+            channelId: config.slackChannelId,
+            timeoutMs: config.timeoutMs,
+            approverIds: config.slackApproverIds,
+          },
+          input,
+        )
+      : telegramRun(
+          {
+            botToken: config.telegramBotToken,
+            chatId: config.telegramChatId,
+            timeoutMs: config.timeoutMs,
+            approverIds: config.telegramApproverIds,
+          },
+          input,
+        );
 
-  const session = createSession(
-    (input) => requestRunApproval(telegramConfig, input),
-    () => requestResumeApproval(telegramConfig),
-  );
+  const resumeApproval = () =>
+    config.provider === "slack"
+      ? slackResume({
+          botToken: config.slackBotToken,
+          appToken: config.slackAppToken,
+          channelId: config.slackChannelId,
+          timeoutMs: config.timeoutMs,
+          approverIds: config.slackApproverIds,
+        })
+      : telegramResume({
+          botToken: config.telegramBotToken,
+          chatId: config.telegramChatId,
+          timeoutMs: config.timeoutMs,
+          approverIds: config.telegramApproverIds,
+        });
+
+  const session = createSession(runApproval, resumeApproval);
 
   // Socket handler that resolves secrets from process.env via the session.
   const socketHandler: SocketHandler = {
@@ -160,7 +237,7 @@ export async function startServer(opts: { envFile?: string } = {}): Promise<void
     {
       title: "Resume Session",
       description:
-        "Request to resume a stopped session. Requires Telegram approval. Only use when the user explicitly asks you to resume.",
+        "Request to resume a stopped session. Requires approval via the configured approval provider (Telegram or Slack). Only use when the user explicitly asks you to resume.",
       inputSchema: z.object({}),
     },
     async () => {
@@ -182,12 +259,12 @@ export async function startServer(opts: { envFile?: string } = {}): Promise<void
     {
       title: "Disable Auto-Approve",
       description:
-        "Disable auto-approval so future secret access requests require Telegram approval again. Only use when the user explicitly asks.",
+        "Disable auto-approval so future secret access requests require approval via the configured approval provider (Telegram or Slack) again. Only use when the user explicitly asks.",
       inputSchema: z.object({}),
     },
     async () => {
       session.disableAutoApprove();
-      return textResponse("Auto-approve disabled. Future requests will require Telegram approval.");
+      return textResponse("Auto-approve disabled. Future requests will require approval again.");
     },
   );
 

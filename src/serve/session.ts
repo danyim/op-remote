@@ -1,5 +1,5 @@
 import type { SocketRequest, SocketResponse } from "../protocol.ts";
-import type { ApprovalResult } from "./telegram.ts";
+import type { ApprovalResult } from "./approval.ts";
 
 export interface RunApprovalInput {
   command: string[];
