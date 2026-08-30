@@ -3,6 +3,12 @@ export type { ApprovalResult };
 
 const API_BASE = "https://api.telegram.org/bot";
 
+// Emoji built from code points — see slack.ts for why: bun build raw-ifies
+// BMP non-ASCII literals, and the bundled runtime then mangles them.
+const ICON_CHECK = String.fromCodePoint(0x2705); // ✅
+const ICON_CROSS = String.fromCodePoint(0x274c); // ❌
+const ICON_CLOCK = String.fromCodePoint(0x23f0); // ⏰
+
 interface TelegramConfig {
   botToken: string;
   chatId: string;
@@ -302,7 +308,7 @@ function handleCallbackQuery(ctx: ApprovalContext, update: TelegramUpdate): Call
     editMessage(
       ctx.config,
       ctx.messageId,
-      `\u2705 ${label} at ${new Date().toLocaleTimeString()}`,
+      `${ICON_CHECK} ${label} at ${new Date().toLocaleTimeString()}`,
       "editMessageText(approved)",
     );
     ctx.finish({ action });
@@ -317,7 +323,7 @@ function handleCallbackQuery(ctx: ApprovalContext, update: TelegramUpdate): Call
   editMessage(
     ctx.config,
     ctx.messageId,
-    `\u274C ${label}. Reply with a reason.`,
+    `${ICON_CROSS} ${label}. Reply with a reason.`,
     "editMessageText(awaiting-reason)",
   );
   return { phase: "await-reason", action: rejection };
@@ -348,7 +354,7 @@ function handleReasonReply(
   editMessage(
     ctx.config,
     ctx.messageId,
-    `\u274C ${label}: ${reason}`,
+    `${ICON_CROSS} ${label}: ${reason}`,
     "editMessageText(reason-accepted)",
   );
   ctx.finish({ action: rejection, reason });
@@ -385,7 +391,7 @@ function awaitApproval(
 
     const timer = setTimeout(() => {
       cleanup();
-      editMessage(config, messageId, "\u23F0 Timed out", "editMessageText(timeout)");
+      editMessage(config, messageId, `${ICON_CLOCK} Timed out`, "editMessageText(timeout)");
       resolve({ action: "reject", reason: "permission request timed out" });
     }, config.timeoutMs);
 

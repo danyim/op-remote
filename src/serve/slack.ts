@@ -35,6 +35,18 @@ export interface RunApprovalOpts {
 
 const API_BASE = "https://slack.com/api/";
 
+// Emoji used in messages, built from code points so the bundled output
+// contains no raw multibyte bytes in string literals. bun build raw-ifies
+// BMP non-ASCII characters in literals, and the bundled runtime then
+// decodes those bytes per-byte, corrupting every emoji that went through
+// the bundle. Code points are immune: the bundle only carries ASCII.
+const ICON_CHECK = String.fromCodePoint(0x2705); // ✅
+const ICON_CROSS = String.fromCodePoint(0x274c); // ❌
+const ICON_CLOCK = String.fromCodePoint(0x23f0); // ⏰
+const ICON_KEY = String.fromCodePoint(0x1f511); // 🔑
+const ICON_RESUME = String.fromCodePoint(0x1f504); // 🔄
+const DASH = String.fromCodePoint(0x2014); // —
+
 // ---------------------------------------------------------------------------
 // Slack Web API helper
 // ---------------------------------------------------------------------------
@@ -86,7 +98,7 @@ export function buildApprovalBlocks(
   return [
     {
       type: "section",
-      text: { type: "mrkdwn", text: "*🔑 Secret access request*" },
+      text: { type: "mrkdwn", text: `*${ICON_KEY} Secret access request*` },
     },
     {
       type: "section",
@@ -139,7 +151,7 @@ export function buildResumeBlocks(nonce: string, timeoutMs: number): SlackBlock[
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*🔄 Resume request*\nThe agent is requesting to resume the session.\n*Expires:* ${formatExpiry(timeoutMs)}`,
+        text: `*${ICON_RESUME} Resume request*\nThe agent is requesting to resume the session.\n*Expires:* ${formatExpiry(timeoutMs)}`,
       },
     },
     {
@@ -369,8 +381,8 @@ function handleInteractive(config: SlackConfig, payload: unknown): void {
     if (APPROVE_ACTIONS.has(parsed.action)) {
       const label = parsed.action === "auto_approve" ? "Auto-approved" : "Approved";
       const at = new Date().toLocaleTimeString();
-      const status = `✅ ${label} at ${at}`;
-      const thread = p.user?.id ? `✅ ${label} by <@${p.user.id}> at ${at}` : status;
+      const status = `${ICON_CHECK} ${label} at ${at}`;
+      const thread = p.user?.id ? `${ICON_CHECK} ${label} by <@${p.user.id}> at ${at}` : status;
       void confirmDecision(ctx, status, thread)
         .catch((err) => console.error("[op-remote:slack] confirm failed:", err.message))
         .then(() => finishApproval(ctx, { action: parsed.action as "approve" | "auto_approve" }));
@@ -403,14 +415,14 @@ function handleInteractive(config: SlackConfig, payload: unknown): void {
       const reason = extractReason(p.view);
       const label = ctx.rejectionAction === "stop" ? "Stopped" : "Rejected";
       const suffix = reason ? `: ${reason}` : "";
-      const status = `❌ ${label}${suffix}`;
-      const thread = p.user?.id ? `❌ ${label} by <@${p.user.id}>${suffix}` : status;
+      const status = `${ICON_CROSS} ${label}${suffix}`;
+      const thread = p.user?.id ? `${ICON_CROSS} ${label} by <@${p.user.id}>${suffix}` : status;
       void confirmDecision(ctx, status, thread)
         .catch((err) => console.error("[op-remote:slack] confirm failed:", err.message))
         .then(() => finishApproval(ctx, { action: ctx.rejectionAction, reason }));
     } else {
-      const status = "❌ Rejected";
-      const thread = p.user?.id ? `❌ Rejected by <@${p.user.id}>` : status;
+      const status = `${ICON_CROSS} Rejected`;
+      const thread = p.user?.id ? `${ICON_CROSS} Rejected by <@${p.user.id}>` : status;
       void confirmDecision(ctx, status, thread)
         .catch((err) => console.error("[op-remote:slack] confirm failed:", err.message))
         .then(() => finishApproval(ctx, { action: ctx.rejectionAction }));
@@ -421,7 +433,7 @@ function handleInteractive(config: SlackConfig, payload: unknown): void {
 async function openReasonModal(ctx: PendingApproval, triggerId: string | undefined): Promise<void> {
   if (!triggerId) {
     // Trigger IDs expire seconds after the interaction; fall back to a plain rejection.
-    await confirmDecision(ctx, "❌ Rejected", "❌ Rejected");
+    await confirmDecision(ctx, `${ICON_CROSS} Rejected`, `${ICON_CROSS} Rejected`);
     finishApproval(ctx, { action: ctx.rejectionAction });
     return;
   }
@@ -468,9 +480,11 @@ function awaitApproval(
       if (!ctx) {
         return;
       }
-      void confirmDecision(ctx, "⏰ Timed out", "⏰ Timed out — no response received").catch(
-        () => {},
-      );
+      void confirmDecision(
+        ctx,
+        `${ICON_CLOCK} Timed out`,
+        `${ICON_CLOCK} Timed out ${DASH} no response received`,
+      ).catch(() => {});
       finishApproval(ctx, { action: "reject", reason: "permission request timed out" });
     }, config.timeoutMs);
 
@@ -498,7 +512,7 @@ export async function requestRunApproval(
   const sent = await slackApi<{ ts: string }>(config.botToken, "chat.postMessage", {
     channel: config.channelId,
     blocks,
-    text: `🔑 Secret access request (expires ${formatExpiry(config.timeoutMs)})`,
+    text: `${ICON_KEY} Secret access request (expires ${formatExpiry(config.timeoutMs)})`,
   });
   return awaitApproval(config, nonce, config.channelId, sent.ts, blocks);
 }
@@ -510,7 +524,7 @@ export async function requestResumeApproval(config: SlackConfig): Promise<Approv
   const sent = await slackApi<{ ts: string }>(config.botToken, "chat.postMessage", {
     channel: config.channelId,
     blocks,
-    text: `🔄 Resume request (expires ${formatExpiry(config.timeoutMs)})`,
+    text: `${ICON_RESUME} Resume request (expires ${formatExpiry(config.timeoutMs)})`,
   });
   return awaitApproval(config, nonce, config.channelId, sent.ts, blocks);
 }
