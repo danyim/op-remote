@@ -197,6 +197,39 @@ export async function startServer(opts: { envFile?: string } = {}): Promise<void
   };
 
   const { sockPath } = createSocketServer(tokens, socketHandler);
+  console.error(`[op-remote] unix socket: ${sockPath}`);
+
+  // Optional localhost HTTP bootstrap: mints one-time tokens for the CLI so
+  // the server can run persistently (e.g. under systemd) without an MCP
+  // stdio client attached. Bound to loopback only; guarded by an admin token.
+  const httpPort = Number.parseInt(process.env.REMOTE_OP_HTTP_PORT ?? "0", 10);
+  const adminToken = process.env.REMOTE_OP_ADMIN_TOKEN ?? "";
+  if (httpPort > 0) {
+    if (!adminToken) {
+      throw new Error("REMOTE_OP_ADMIN_TOKEN is required when REMOTE_OP_HTTP_PORT is set");
+    }
+    const http = Bun.serve({
+      hostname: "127.0.0.1",
+      port: httpPort,
+      fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname === "/health") {
+          return Response.json({ ok: true, stopped: session.isStopped() });
+        }
+        if (url.pathname === "/token") {
+          if (req.headers.get("Authorization") !== `Bearer ${adminToken}`) {
+            return new Response("unauthorized", { status: 401 });
+          }
+          if (session.isStopped()) {
+            return Response.json({ error: "session stopped by user" }, { status: 403 });
+          }
+          return Response.json({ token: tokens.create(), sock: sockPath });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    console.error(`[op-remote] HTTP token endpoint: http://127.0.0.1:${http.port}`);
+  }
 
   // MCP server.
   const mcp = new McpServer(

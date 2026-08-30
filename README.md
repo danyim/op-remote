@@ -66,6 +66,8 @@ bun install -g @wyattjoh/op-remote
 | `SLACK_APP_TOKEN`                 | If slack    | Slack app-level token (`xapp-...`, Socket Mode, `connections:write`)             |
 | `SLACK_CHANNEL_ID`                | If slack    | Slack channel ID to send approval messages to (bot must be a member)             |
 | `SLACK_APPROVER_IDS`              | No          | Comma-separated Slack user IDs allowed to approve/reject (all users if unset)    |
+| `REMOTE_OP_HTTP_PORT`             | No          | Bind a localhost HTTP bootstrap (0 = off). Mints one-time tokens for the CLI     |
+| `REMOTE_OP_ADMIN_TOKEN`           | If HTTP     | Bearer token required to mint tokens via the HTTP endpoint                       |
 | `REMOTE_OP_TIMEOUT`               | No          | Approval timeout in seconds (default: `120`)                                     |
 
 When installed as the Claude Code plugin, the Telegram variables above are
@@ -99,6 +101,29 @@ reason. On every decision the card is updated to show the outcome (buttons
 removed) and the confirmation is posted as a thread reply to the original
 request. Secrets never appear in Slack — only variable names, the command,
 and the working directory.
+
+### Running persistently (systemd)
+
+The server normally runs as an MCP child process, but it can also run as a
+long-lived service that holds the resolved secrets in memory and keeps the
+approval socket available across agent restarts:
+
+1. Build: `bun run build`, then run `bun dist/cli.js serve --env-file=...`.
+2. The service needs an authenticated `op` session only at startup (it
+   resolves `op://` references once). Put a fresh session token in the
+   service environment as `OP_SESSION_<account_user_uuid>` (find the UUID
+   with `op account list`); refresh it with `op signin --raw` whenever the
+   service fails to start after a long downtime.
+3. Set `REMOTE_OP_HTTP_PORT` (loopback-only) and `REMOTE_OP_ADMIN_TOKEN` so
+   agents can mint one-time tokens without an MCP stdio client:
+   ```bash
+   curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" http://127.0.0.1:8788/token
+   # -> {"token":"...","sock":"/tmp/op-remote/<uuid>.sock"}
+   ```
+4. Agents then run the CLI against the service:
+   ```bash
+   op-remote run --token="$TOKEN" --sock="$SOCK" --env-file=.env.tpl --reason="..." -- CMD
+   ```
 
 ### Project `.env.tpl` (required)
 
